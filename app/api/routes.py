@@ -5,6 +5,7 @@ from core.angle_classifier import AngleClassifier
 from core.quality_checker import QualityChecker
 from core.feature_calculator import FeatureCalculator
 from core.image_preprocessor import ImagePreprocessor, preprocessor
+from core.visualizer import visualizer
 from features.front_view_features import FrontViewFeatures
 from features.profile_features import ProfileFeatures
 from features.composite_features import CompositeFeatures
@@ -107,7 +108,7 @@ def aggregate_measurements(measurements_list: list[dict]) -> dict:
     
     return aggregated
 
-async def process_analysis_pipeline(images: list[np.ndarray]) -> ScanResponse:
+async def process_analysis_pipeline(images: list[np.ndarray], include_visuals: bool = False) -> ScanResponse:
     """
     Shared pipeline for processing a sequence of frames (from JSON or Video).
     Features multi-frame averaging and lighting normalization for improved accuracy.
@@ -123,6 +124,7 @@ async def process_analysis_pipeline(images: list[np.ndarray]) -> ScanResponse:
     
     best_front_frame_features = {}
     best_profile_frame_features = {} 
+    visualization_image_b64 = None 
     
     # Pass 1: Preprocess, Detect Landmarks & Classify Angles
     detected_ipd_pixels = 0.0
@@ -161,6 +163,15 @@ async def process_analysis_pipeline(images: list[np.ndarray]) -> ScanResponse:
                 "quality": quality
             }
             
+            # Generate visualization if requested (from the first good front frame)
+            if include_visuals and visualization_image_b64 is None:
+                viz_img = visualizer.draw_mesh(img_processed, landmarks)
+                viz_img = visualizer.draw_pose_info(viz_img, yaw, pitch, roll)
+                
+                # Convert to base64
+                _, buffer = cv2.imencode('.jpg', cv2.cvtColor(viz_img, cv2.COLOR_RGB2BGR))
+                visualization_image_b64 = base64.b64encode(buffer).decode('utf-8')
+
             processed_frames.append(frame_data)
             frames_by_angle[angle] = frames_by_angle.get(angle, 0) + 1
             
@@ -327,7 +338,8 @@ async def process_analysis_pipeline(images: list[np.ndarray]) -> ScanResponse:
         measurements=measurements_out,
         golden_ratio_analysis=golden_ratio_result,
         ai_recommendations=ai_result,
-        quality_metrics={"status": "processed"}
+        quality_metrics={"status": "processed"},
+        processed_image=visualization_image_b64
     )
 
 @router.post("/scan/analyze-realtime", response_model=RealtimeResponse)
@@ -345,7 +357,12 @@ async def analyze_realtime(request: RealtimeRequest):
         angle_label = angle_classifier.classify_angle(yaw, pitch, roll)
 
     quality = quality_checker.check_quality(img, landmarks_detected, yaw)
-    
+    processed_image_b64 = None
+    if request.include_visuals and landmarks_detected:
+         viz_img = visualizer.draw_mesh(img, landmarks)
+         viz_img = visualizer.draw_pose_info(viz_img, yaw, pitch, roll)
+         _, buffer = cv2.imencode('.jpg', cv2.cvtColor(viz_img, cv2.COLOR_RGB2BGR))
+         processed_image_b64 = base64.b64encode(buffer).decode('utf-8')
     feedback = {
         "message": "Face not detected" if not landmarks_detected else f"Angle: {angle_label}",
         "current_yaw": yaw
@@ -357,7 +374,8 @@ async def analyze_realtime(request: RealtimeRequest):
         angle_confidence=1.0 if landmarks_detected else 0.0,
         quality_score=quality["score"],
         feedback=feedback,
-        landmarks_detected=landmarks_detected
+        landmarks_detected=landmarks_detected,
+        processed_image=processed_image_b64
     )
 
 @router.post("/scan/analyze", response_model=ScanResponse)
@@ -371,7 +389,7 @@ async def analyze_scan(request: ScanRequest):
         except:
             continue
     
-    return await process_analysis_pipeline(images)
+    return await process_analysis_pipeline(images, include_visuals=request.include_visuals)
 
 @router.post("/scan/upload-video", response_model=ScanResponse)
 async def analyze_video(file: UploadFile = File(...)):
@@ -405,7 +423,7 @@ async def analyze_video(file: UploadFile = File(...)):
         if not images:
             raise HTTPException(status_code=400, detail="Could not extract frames from video")
             
-        return await process_analysis_pipeline(images)
+        return await process_analysis_pipeline(images, include_visuals=False)
 
     finally:
         # Cleanup

@@ -8,10 +8,12 @@ class FrameData(BaseModel):
 
 class ScanRequest(BaseModel):
     frames: List[FrameData]
+    include_visuals: bool = False
     config: Optional[Dict[str, Any]] = {}
 
 class RealtimeRequest(BaseModel):
     image: str
+    include_visuals: bool = False
     timestamp: float
 
 class QualityMetrics(BaseModel):
@@ -33,6 +35,7 @@ class ScanResponse(BaseModel):
     golden_ratio_analysis: Optional[Dict[str, Any]] = None
     ai_recommendations: Optional[Dict[str, Any]] = None
     quality_metrics: Optional[Dict[str, Any]] = None
+    processed_image: Optional[str] = None
     error: Optional[str] = None
 
 class RealtimeResponse(BaseModel):
@@ -42,3 +45,4 @@ class RealtimeResponse(BaseModel):
     quality_score: float
     feedback: Dict[str, Any]
     landmarks_detected: bool
+    processed_image: Optional[str] = None

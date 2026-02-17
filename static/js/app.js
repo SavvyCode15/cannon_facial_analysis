@@ -65,13 +65,25 @@ async function setupCamera() {
 connectBtn.addEventListener('click', setupCamera);
 
 // Processing Loop (Realtime)
+let meshOverlayImg = null; // Cached mesh image for smooth rendering
+let isProcessingFrame = false; // Prevent overlapping requests
+
 async function processFrame() {
     if (!video.videoWidth) {
         requestAnimationFrame(processFrame);
         return;
     }
 
+    // Draw the live video
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // Overlay the mesh image if available
+    if (meshOverlayImg && meshOverlayImg.complete) {
+        ctx.globalAlpha = 0.7;
+        ctx.drawImage(meshOverlayImg, 0, 0, canvas.width, canvas.height);
+        ctx.globalAlpha = 1.0;
+    }
+
     const imageData = canvas.toDataURL('image/jpeg', 0.8);
 
     // If scanning, collect frames
@@ -87,23 +99,38 @@ async function processFrame() {
         }
     }
 
-    // Send for realtime analysis 
-    if (!isScanning && Math.random() < 0.2) {
+    // Send for realtime analysis (always, with mesh visuals)
+    if (!isProcessingFrame && Math.random() < 0.3) {
+        isProcessingFrame = true;
         try {
             const response = await fetch('/api/scan/analyze-realtime', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ image: imageData, timestamp: Date.now() / 1000 })
+                body: JSON.stringify({
+                    image: imageData,
+                    include_visuals: true,
+                    timestamp: Date.now() / 1000
+                })
             });
             const data = await response.json();
 
             if (data.success) {
                 angleText.innerText = `Angle: ${data.detected_angle} (Q: ${data.quality_score.toFixed(2)})`;
                 if (!isScanning) feedbackText.innerText = data.feedback.message;
+
+                // Update mesh overlay image
+                if (data.processed_image) {
+                    const img = new Image();
+                    img.onload = () => { meshOverlayImg = img; };
+                    img.src = 'data:image/jpeg;base64,' + data.processed_image;
+                } else {
+                    meshOverlayImg = null;
+                }
             }
         } catch (e) {
             console.error("Realtime API error", e);
         }
+        isProcessingFrame = false;
     }
 
     requestAnimationFrame(processFrame);
@@ -126,7 +153,11 @@ async function finishScan() {
         const response = await fetch('/api/scan/analyze', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ frames: scanFrames, config: {} })
+            body: JSON.stringify({
+                frames: scanFrames,
+                include_visuals: true,
+                config: {}
+            })
         });
         const data = await response.json();
 
@@ -143,6 +174,18 @@ async function finishScan() {
 function displayResults(data) {
     resultsDiv.style.display = 'block';
     metricsContainer.innerHTML = '';
+
+    // -1. Visual Mesh Overlay
+    if (data.processed_image) {
+        const imgContainer = document.createElement('div');
+        imgContainer.style.textAlign = 'center';
+        imgContainer.style.marginBottom = '20px';
+        imgContainer.innerHTML = `
+            <h3 style="color: #444; margin-bottom: 10px;">Analysis Overlay</h3>
+            <img src="data:image/jpeg;base64,${data.processed_image}" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        `;
+        metricsContainer.appendChild(imgContainer);
+    }
 
     // 0. Overall Score
     if (data.scan_summary && data.scan_summary.overall_score) {
