@@ -89,11 +89,15 @@ class FrontViewFeatures:
         nose_width = self.calculator.distance(nose_left[:2], nose_right[:2])
         features['nose_width_ratio'] = nose_width / (face_width + 1e-6)
         
-        # 16. Cheekbone Prominence & Bigonial Width
+        # 16. Cheekbone Prominence, Bigonial Width, & Zygomatic Projection
         jaw_width = self.calculator.distance(landmarks_array[self.LM_JAW_LEFT][:2], landmarks_array[self.LM_JAW_RIGHT][:2])
         features['bigonial_width_pixels'] = jaw_width
         features['cheekbone_prominence'] = face_width / (jaw_width + 1e-6)
         features['jaw_cheek_ratio'] = jaw_width / (face_width + 1e-6) # Inverse
+        
+        # Zygomatic projection: How wide the cheekbones curve outwards relative to inner facial structure
+        outer_eye_width = self.calculator.distance(landmarks_array[33][:2], landmarks_array[263][:2])
+        features['zygomatic_projection'] = face_width / (outer_eye_width + 1e-6)
         
         # Brow Height (Pupil to Brow)
         l_brow = landmarks_array[self.LM_BROW_LEFT]
